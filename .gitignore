@@ -1,0 +1,20 @@
+# Python environments
+.venv/
+venv/
+
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated pipeline state and outputs
+work/
+output/
+
+# Logs and local settings
+*.log
+.env
+.vscode/
+dataset/
