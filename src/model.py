@@ -27,7 +27,7 @@ class PairMatcher:
         )
         self.estimator = xgb.train(
             {
-                "max_depth": 6,
+                "max_depth": 5,
                 "eta": 0.08,
                 "subsample": 0.8,
                 "colsample_bytree": 0.9,
@@ -35,13 +35,13 @@ class PairMatcher:
                 "eval_metric": "logloss",
                 "tree_method": "hist",
                 "device": "cuda",
-                "max_bin": 128,
+                "max_bin": 64,
                 "nthread": 4,
                 "seed": 42,
                 "lambda": 2.0,
             },
             training_data,
-            num_boost_round=180,
+            num_boost_round=120,
         )
         return self
 
@@ -56,6 +56,8 @@ class PairMatcher:
         return pd.Series(self.estimator.predict(prediction_data), index=features.index)
 
     def predict_ids(self, features: pd.DataFrame) -> Dict[str, list[str]]:
+        if features.empty:
+            return {}
         probabilities = self.predict_proba(features)
         selected = features.loc[probabilities >= self.threshold].copy()
         selected["probability"] = probabilities[probabilities >= self.threshold]

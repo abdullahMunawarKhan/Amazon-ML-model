@@ -1,7 +1,6 @@
 """Memory-bounded candidate generation using a SQLite inverted token index."""
 
 import sqlite3
-from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Sequence, Set, Tuple
 
@@ -18,13 +17,15 @@ def _tokens(row: pd.Series) -> Set[str]:
     return {token for token in values if len(token) >= 2}
 
 
-def build_index(source_paths: Sequence[Path], database_path: Path, chunksize: int = 100_000) -> None:
+def build_index(source_paths: Sequence[Path], database_path: Path, chunksize: int = 10_000) -> None:
     database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database_path)
     try:
         connection.executescript("""
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=OFF;
+            PRAGMA cache_size=-65536;
+            PRAGMA temp_store=FILE;
             CREATE TABLE IF NOT EXISTS records (entity_id TEXT PRIMARY KEY, business_name TEXT, business_address TEXT, country TEXT, name_norm TEXT, name_core TEXT, address_norm TEXT);
             CREATE TABLE IF NOT EXISTS token_index (token TEXT NOT NULL, entity_id TEXT NOT NULL, country TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS token_index_lookup ON token_index(token, country);
@@ -34,18 +35,24 @@ def build_index(source_paths: Sequence[Path], database_path: Path, chunksize: in
                 normalized = add_normalized_columns(chunk)
                 records = normalized[["entity_id", "business_name", "business_address", "country", "name_norm", "name_core", "address_norm"]].itertuples(index=False, name=None)
                 connection.executemany("INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?, ?, ?, ?)", records)
-                token_rows = []
-                for row in normalized.itertuples(index=False):
-                    token_rows.extend((token, row.entity_id, row.country) for token in _tokens(row))
+                token_rows = (
+                    (token, row.entity_id, row.country)
+                    for row in normalized.itertuples(index=False)
+                    for token in _tokens(row)
+                )
                 connection.executemany("INSERT INTO token_index VALUES (?, ?, ?)", token_rows)
                 connection.commit()
+                print(f"indexed {path.name}: {chunk.index[-1] + 1:,} rows", flush=True)
         connection.execute("ANALYZE")
     finally:
         connection.close()
 
 
 def candidates_for_row(row: pd.Series, connection: sqlite3.Connection, max_candidates: int = 250) -> List[str]:
-    normalized = add_normalized_columns(pd.DataFrame([row])).iloc[0]
+    if "name_tokens" in row.index and "address_tokens" in row.index:
+        normalized = row
+    else:
+        normalized = add_normalized_columns(pd.DataFrame([row])).iloc[0]
     tokens = sorted(_tokens(normalized))
     if not tokens:
         return []
